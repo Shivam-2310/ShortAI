@@ -2,8 +2,6 @@
 
 A full-stack, production-ready URL shortener with advanced analytics and AI features, built with React, Spring Boot, PostgreSQL, and Redis.
 
-![ShortAI Screenshot](https://via.placeholder.com/1200x600/0a0a0f/6366f1?text=ShortAI+-+AI+URL+Shortener)
-
 ## ✨ Features
 
 ### 🎯 Core Features
