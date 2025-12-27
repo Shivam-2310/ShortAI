@@ -1,0 +1,17 @@
+# Development profile configuration
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: create
+    show-sql: true
+  sql:
+    init:
+      mode: always
+
+logging:
+  level:
+    root: DEBUG
+    com.urlshortener: DEBUG
+    org.hibernate.SQL: DEBUG
+    org.hibernate.type.descriptor.sql.BasicBinder: TRACE
+
