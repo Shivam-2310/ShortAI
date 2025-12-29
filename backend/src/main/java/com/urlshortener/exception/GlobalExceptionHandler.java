@@ -12,6 +12,8 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.MultipartException;
 
 import java.time.LocalDateTime;
 import java.util.stream.Collectors;
@@ -149,14 +151,44 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
     }
 
+    @ExceptionHandler(MultipartException.class)
+    public ResponseEntity<ErrorResponse> handleMultipartException(MultipartException ex, HttpServletRequest request) {
+        log.error("Multipart file upload error: {}", ex.getMessage(), ex);
+
+        String message = "File upload error";
+        if (ex instanceof MaxUploadSizeExceededException) {
+            message = "File size exceeds maximum allowed size";
+        } else if (ex.getCause() != null) {
+            message = "File upload failed: " + ex.getCause().getMessage();
+        } else {
+            message = "File upload failed: " + ex.getMessage();
+        }
+
+        ErrorResponse error = ErrorResponse.builder()
+                .status(HttpStatus.BAD_REQUEST.value())
+                .error("Bad Request")
+                .message(message)
+                .path(request.getRequestURI())
+                .timestamp(LocalDateTime.now())
+                .build();
+
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleGenericException(Exception ex, HttpServletRequest request) {
-        log.error("Unexpected error", ex);
+        log.error("Unexpected error: {}", ex.getMessage(), ex);
+
+        // Include actual error message in development
+        String message = "An unexpected error occurred: " + ex.getMessage();
+        if (ex.getCause() != null) {
+            message += " (Caused by: " + ex.getCause().getMessage() + ")";
+        }
 
         ErrorResponse error = ErrorResponse.builder()
                 .status(HttpStatus.INTERNAL_SERVER_ERROR.value())
                 .error("Internal Server Error")
-                .message("An unexpected error occurred")
+                .message(message)
                 .path(request.getRequestURI())
                 .timestamp(LocalDateTime.now())
                 .build();

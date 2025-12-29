@@ -1,11 +1,18 @@
 import React, { useState } from 'react';
 import { UrlShortenerForm } from '../components/UrlShortenerForm';
+import { CsvUploadForm } from '../components/CsvUploadForm';
 import { ResultCard } from '../components/ResultCard';
-import type { CreateUrlResponse } from '../types';
+import { BulkResultCard } from '../components/BulkResultCard';
+import type { CreateUrlResponse, BulkCreateResponse } from '../types';
 import { motion } from 'framer-motion';
+import { Link, FileText } from 'lucide-react';
+
+type TabType = 'single' | 'bulk';
 
 export const HomePage: React.FC = () => {
-    const [result, setResult] = useState<CreateUrlResponse | null>(null);
+    const [activeTab, setActiveTab] = useState<TabType>('single');
+    const [singleResult, setSingleResult] = useState<CreateUrlResponse | null>(null);
+    const [bulkResult, setBulkResult] = useState<BulkCreateResponse | null>(null);
 
     return (
         <div className="space-y-12 pb-12">
@@ -28,12 +35,57 @@ export const HomePage: React.FC = () => {
                 </motion.p>
             </div>
 
-            <UrlShortenerForm onSuccess={setResult} />
+            {/* Tabs */}
+            <div className="flex justify-center">
+                <div className="inline-flex bg-gray-100 rounded-xl p-1">
+                    <button
+                        onClick={() => {
+                            setActiveTab('single');
+                            setSingleResult(null);
+                            setBulkResult(null);
+                        }}
+                        className={`flex items-center space-x-2 px-6 py-3 rounded-lg font-medium transition-all ${
+                            activeTab === 'single'
+                                ? 'bg-white text-indigo-600 shadow-sm'
+                                : 'text-gray-600 hover:text-gray-900'
+                        }`}
+                    >
+                        <Link className="w-4 h-4" />
+                        <span>Single URL</span>
+                    </button>
+                    <button
+                        onClick={() => {
+                            setActiveTab('bulk');
+                            setSingleResult(null);
+                            setBulkResult(null);
+                        }}
+                        className={`flex items-center space-x-2 px-6 py-3 rounded-lg font-medium transition-all ${
+                            activeTab === 'bulk'
+                                ? 'bg-white text-indigo-600 shadow-sm'
+                                : 'text-gray-600 hover:text-gray-900'
+                        }`}
+                    >
+                        <FileText className="w-4 h-4" />
+                        <span>Bulk CSV Upload</span>
+                    </button>
+                </div>
+            </div>
 
-            {result && <ResultCard data={result} />}
+            {/* Form Content */}
+            {activeTab === 'single' ? (
+                <>
+                    <UrlShortenerForm onSuccess={setSingleResult} />
+                    {singleResult && <ResultCard data={singleResult} />}
+                </>
+            ) : (
+                <>
+                    <CsvUploadForm onSuccess={setBulkResult} />
+                    {bulkResult && <BulkResultCard data={bulkResult} />}
+                </>
+            )}
 
             {/* Features Grid */}
-            {!result && (
+            {!singleResult && !bulkResult && (
                 <motion.div 
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}

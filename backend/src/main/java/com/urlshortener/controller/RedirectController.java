@@ -2,6 +2,7 @@ package com.urlshortener.controller;
 
 import com.urlshortener.dto.ErrorResponse;
 import com.urlshortener.dto.PasswordVerifyRequest;
+import com.urlshortener.exception.InvalidPasswordException;
 import com.urlshortener.exception.PasswordRequiredException;
 import com.urlshortener.service.EnhancedAnalyticsService;
 import com.urlshortener.service.UrlShortenerService;
@@ -62,14 +63,23 @@ public class RedirectController {
                     content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     })
     @GetMapping("/{shortKey:[a-zA-Z0-9_-]{1,50}}")
-    public ResponseEntity<Void> redirect(
+    public ResponseEntity<?> redirect(
             @Parameter(description = "The short key or custom alias")
             @PathVariable String shortKey,
+            @Parameter(description = "Password for password-protected URLs")
+            @RequestParam(required = false) String password,
             HttpServletRequest request) {
         log.debug("Redirect request for key: {}", shortKey);
 
         try {
-            String originalUrl = urlShortenerService.resolveUrl(shortKey);
+            String originalUrl;
+            
+            // If password is provided, try to resolve with password
+            if (password != null && !password.isEmpty()) {
+                originalUrl = urlShortenerService.resolveUrlWithPassword(shortKey, password);
+            } else {
+                originalUrl = urlShortenerService.resolveUrl(shortKey);
+            }
 
             // Extract request data before async call (HttpServletRequest cannot be used in async)
             var requestData = enhancedAnalyticsService.extractRequestData(request);
@@ -82,10 +92,15 @@ public class RedirectController {
 
             return new ResponseEntity<>(headers, HttpStatus.FOUND);
         } catch (PasswordRequiredException e) {
-            // Return 401 to indicate password is required
-            HttpHeaders headers = new HttpHeaders();
-            headers.add("X-Password-Required", "true");
-            return new ResponseEntity<>(headers, HttpStatus.UNAUTHORIZED);
+            // Return HTML password form page
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .contentType(org.springframework.http.MediaType.TEXT_HTML)
+                    .body(generatePasswordFormHtml(shortKey));
+        } catch (InvalidPasswordException e) {
+            // Return HTML password form with error message
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .contentType(org.springframework.http.MediaType.TEXT_HTML)
+                    .body(generatePasswordFormHtml(shortKey, "Invalid password. Please try again."));
         }
     }
 
@@ -121,5 +136,73 @@ public class RedirectController {
         headers.add(HttpHeaders.CACHE_CONTROL, "no-cache, no-store, must-revalidate");
 
         return new ResponseEntity<>(headers, HttpStatus.FOUND);
+    }
+
+    /**
+     * Generates an HTML password form for password-protected URLs.
+     */
+    private String generatePasswordFormHtml(String shortKey, String errorMessage) {
+        String errorHtml = errorMessage != null 
+            ? "<div style='color: #dc2626; background: #fee2e2; padding: 12px; border-radius: 6px; margin-bottom: 20px; font-size: 14px;'>" + 
+              "<strong>⚠️</strong> " + errorMessage + "</div>" 
+            : "";
+        
+        return "<!DOCTYPE html>" +
+               "<html lang='en'>" +
+               "<head>" +
+               "<meta charset='UTF-8'>" +
+               "<meta name='viewport' content='width=device-width, initial-scale=1.0'>" +
+               "<title>Password Required - URL Shortener</title>" +
+               "<style>" +
+               "body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; " +
+               "background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); margin: 0; padding: 0; " +
+               "min-height: 100vh; display: flex; align-items: center; justify-content: center; }" +
+               ".container { background: white; padding: 40px; border-radius: 12px; " +
+               "box-shadow: 0 20px 60px rgba(0,0,0,0.3); max-width: 400px; width: 100%; }" +
+               "h1 { color: #1f2937; margin: 0 0 10px 0; font-size: 24px; font-weight: 600; }" +
+               ".subtitle { color: #6b7280; margin: 0 0 30px 0; font-size: 14px; }" +
+               ".form-group { margin-bottom: 20px; }" +
+               "label { display: block; margin-bottom: 8px; color: #374151; font-weight: 500; font-size: 14px; }" +
+               "input { width: 100%; padding: 12px; border: 2px solid #e5e7eb; border-radius: 8px; " +
+               "font-size: 16px; box-sizing: border-box; transition: border-color 0.2s; }" +
+               "input:focus { outline: none; border-color: #667eea; }" +
+               "button { width: 100%; padding: 14px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); " +
+               "color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: 600; " +
+               "cursor: pointer; transition: transform 0.1s, box-shadow 0.2s; }" +
+               "button:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4); }" +
+               "button:active { transform: translateY(0); }" +
+               ".lock-icon { text-align: center; font-size: 48px; margin-bottom: 20px; }" +
+               "</style>" +
+               "</head>" +
+               "<body>" +
+               "<div class='container'>" +
+               "<div class='lock-icon'>🔒</div>" +
+               "<h1>Password Required</h1>" +
+               "<p class='subtitle'>This link is password protected. Please enter the password to continue.</p>" +
+               errorHtml +
+               "<form method='GET' action='/" + shortKey + "'>" +
+               "<div class='form-group'>" +
+               "<label for='password'>Password</label>" +
+               "<input type='password' id='password' name='password' placeholder='Enter password' required autofocus>" +
+               "</div>" +
+               "<button type='submit'>Unlock & Continue</button>" +
+               "</form>" +
+               "</div>" +
+               "<script>" +
+               "document.getElementById('password').focus();" +
+               "document.querySelector('form').addEventListener('submit', function(e) {" +
+               "  const password = document.getElementById('password').value;" +
+               "  if (!password) { e.preventDefault(); return; }" +
+               "});" +
+               "</script>" +
+               "</body>" +
+               "</html>";
+    }
+
+    /**
+     * Generates an HTML password form for password-protected URLs (without error message).
+     */
+    private String generatePasswordFormHtml(String shortKey) {
+        return generatePasswordFormHtml(shortKey, null);
     }
 }

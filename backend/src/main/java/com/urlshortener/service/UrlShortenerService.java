@@ -209,13 +209,48 @@ public class UrlShortenerService {
     /**
      * Creates multiple short URLs in bulk.
      */
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public BulkCreateResponse createBulkShortUrls(BulkCreateRequest request) {
+        if (request == null) {
+            throw new IllegalArgumentException("BulkCreateRequest cannot be null");
+        }
+        
+        if (request.getUrls() == null || request.getUrls().isEmpty()) {
+            log.warn("Bulk create request has no URLs");
+            return BulkCreateResponse.builder()
+                    .successCount(0)
+                    .failedCount(0)
+                    .results(new ArrayList<>())
+                    .errors(new ArrayList<>())
+                    .build();
+        }
+
         List<CreateUrlResponse> results = new ArrayList<>();
         List<BulkCreateResponse.BulkError> errors = new ArrayList<>();
 
         for (int i = 0; i < request.getUrls().size(); i++) {
             CreateUrlRequest urlRequest = request.getUrls().get(i);
+            
+            if (urlRequest == null) {
+                log.warn("Skipping null URL request at index {}", i);
+                errors.add(BulkCreateResponse.BulkError.builder()
+                        .index(i)
+                        .originalUrl("null")
+                        .error("URL request is null")
+                        .build());
+                continue;
+            }
+
+            // Validate that originalUrl is not null or empty
+            if (urlRequest.getOriginalUrl() == null || urlRequest.getOriginalUrl().trim().isEmpty()) {
+                log.warn("Skipping URL request with empty originalUrl at index {}", i);
+                errors.add(BulkCreateResponse.BulkError.builder()
+                        .index(i)
+                        .originalUrl("")
+                        .error("Original URL is required")
+                        .build());
+                continue;
+            }
 
             // Apply bulk-level settings
             if (request.getFetchMetadata() != null) {
@@ -229,11 +264,17 @@ public class UrlShortenerService {
                 CreateUrlResponse response = createShortUrl(urlRequest);
                 results.add(response);
             } catch (Exception e) {
-                log.warn("Failed to create short URL for index {}: {}", i, e.getMessage());
+                log.warn("Failed to create short URL for index {}: {}", i, e.getMessage(), e);
+                String originalUrl = urlRequest.getOriginalUrl() != null ? urlRequest.getOriginalUrl() : "unknown";
+                String errorMessage = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+                // Truncate error message if too long
+                if (errorMessage.length() > 200) {
+                    errorMessage = errorMessage.substring(0, 197) + "...";
+                }
                 errors.add(BulkCreateResponse.BulkError.builder()
                         .index(i)
-                        .originalUrl(urlRequest.getOriginalUrl())
-                        .error(e.getMessage())
+                        .originalUrl(originalUrl)
+                        .error(errorMessage)
                         .build());
             }
         }
@@ -299,16 +340,14 @@ public class UrlShortenerService {
         if (!Boolean.TRUE.equals(urlMapping.getIsPasswordProtected())) {
             Optional<String> cachedUrl = cacheService.get(shortKey);
             if (cachedUrl.isPresent()) {
-                analyticsService.incrementClickCountAsync(shortKey);
+                // Click counting is handled by EnhancedAnalyticsService.trackClick() in the controller
                 return cachedUrl.get();
             }
             // Populate cache
             cacheService.put(shortKey, originalUrl);
         }
 
-        // Track analytics
-        analyticsService.incrementClickCountAsync(shortKey);
-
+        // Click counting is handled by EnhancedAnalyticsService.trackClick() in the controller
         return originalUrl;
     }
 

@@ -29,9 +29,9 @@ public class CreateUrlRequest {
     )
     private String originalUrl;
 
-    @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
     @Schema(
-            description = "Optional expiration date/time for the short URL (ISO 8601 format)",
+            description = "Optional expiration date/time for the short URL (ISO 8601 format, e.g., 2025-12-31T23:59:59 or 2025-12-31T23:59:59.932Z)",
             example = "2025-12-31T23:59:59"
     )
     private LocalDateTime expiresAt;

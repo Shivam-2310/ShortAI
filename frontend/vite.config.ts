@@ -8,9 +8,11 @@ export default defineConfig({
     port: 5000,
     proxy: {
       '/api': {
-        target: 'http://localhost:8081',
+        target: 'http://localhost:8080',
         changeOrigin: true,
         secure: false,
+        // Configure for file uploads
+        timeout: 60000,
       }
     }
   }

@@ -5,6 +5,7 @@ import com.urlshortener.dto.analytics.DetailedAnalytics;
 import com.urlshortener.service.EnhancedAnalyticsService;
 import com.urlshortener.service.QrCodeService;
 import com.urlshortener.service.UrlShortenerService;
+import com.urlshortener.util.CsvParser;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -18,7 +19,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -76,10 +79,138 @@ public class UrlController {
     })
     @PostMapping("/bulk")
     public ResponseEntity<BulkCreateResponse> createBulkShortUrls(@Valid @RequestBody BulkCreateRequest request) {
-        log.info("Bulk creating {} short URLs", request.getUrls().size());
-        BulkCreateResponse response = urlShortenerService.createBulkShortUrls(request);
-        log.info("Bulk creation completed: {} success, {} failed", response.getSuccessCount(), response.getFailedCount());
-        return ResponseEntity.status(HttpStatus.CREATED).body(response);
+        try {
+            if (request == null) {
+                log.warn("Bulk create request is null");
+                return ResponseEntity.badRequest()
+                        .body(BulkCreateResponse.builder()
+                                .successCount(0)
+                                .failedCount(0)
+                                .results(Collections.emptyList())
+                                .errors(Collections.emptyList())
+                                .build());
+            }
+            
+            if (request.getUrls() == null || request.getUrls().isEmpty()) {
+                log.warn("Bulk create request has no URLs");
+                return ResponseEntity.badRequest()
+                        .body(BulkCreateResponse.builder()
+                                .successCount(0)
+                                .failedCount(0)
+                                .results(Collections.emptyList())
+                                .errors(Collections.emptyList())
+                                .build());
+            }
+            
+            log.info("Bulk creating {} short URLs", request.getUrls().size());
+            BulkCreateResponse response = urlShortenerService.createBulkShortUrls(request);
+            log.info("Bulk creation completed: {} success, {} failed", response.getSuccessCount(), response.getFailedCount());
+            return ResponseEntity.status(HttpStatus.CREATED).body(response);
+        } catch (IllegalArgumentException e) {
+            log.warn("Invalid bulk create request: {}", e.getMessage(), e);
+            return ResponseEntity.badRequest()
+                    .body(BulkCreateResponse.builder()
+                            .successCount(0)
+                            .failedCount(0)
+                            .results(Collections.emptyList())
+                            .errors(Collections.emptyList())
+                            .build());
+        } catch (Exception e) {
+            log.error("Error in bulk create endpoint: {}", e.getMessage(), e);
+            // Return a proper error response instead of throwing
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(BulkCreateResponse.builder()
+                            .successCount(0)
+                            .failedCount(0)
+                            .results(Collections.emptyList())
+                            .errors(Collections.emptyList())
+                            .build());
+        }
+    }
+
+    @Operation(
+            summary = "Bulk create short URLs from CSV",
+            description = "Upload a CSV file containing URLs (one per line) to create multiple shortened URLs. " +
+                    "Maximum 100 URLs per file. CSV format: one URL per line, or CSV with 'url' header."
+    )
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "201", description = "Bulk creation completed",
+                    content = @Content(schema = @Schema(implementation = BulkCreateResponse.class))),
+            @ApiResponse(responseCode = "400", description = "Invalid CSV file or request",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    @PostMapping(value = "/bulk/csv", consumes = MediaType.MULTIPART_FORM_DATA_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<BulkCreateResponse> createBulkShortUrlsFromCsv(
+            @Parameter(description = "CSV file containing URLs (one per line)")
+            @RequestParam(value = "file", required = false) MultipartFile file,
+            @Parameter(description = "Whether to fetch metadata for all URLs")
+            @RequestParam(value = "fetchMetadata", required = false) String fetchMetadataStr,
+            @Parameter(description = "Whether to enable AI analysis for all URLs")
+            @RequestParam(value = "enableAiAnalysis", required = false) String enableAiAnalysisStr) {
+        
+        log.info("CSV upload endpoint called - file: {}, fetchMetadata: {}, enableAiAnalysis: {}", 
+                file != null ? file.getOriginalFilename() : "null", fetchMetadataStr, enableAiAnalysisStr);
+        
+        // Parse boolean parameters safely
+        Boolean fetchMetadata = "true".equalsIgnoreCase(fetchMetadataStr);
+        Boolean enableAiAnalysis = "true".equalsIgnoreCase(enableAiAnalysisStr);
+        
+        if (file == null || file.isEmpty()) {
+            log.warn("CSV file upload failed: file is null or empty");
+            return ResponseEntity.badRequest()
+                    .body(BulkCreateResponse.builder()
+                            .successCount(0)
+                            .failedCount(0)
+                            .results(Collections.emptyList())
+                            .errors(Collections.emptyList())
+                            .build());
+        }
+        
+        log.info("Bulk creating short URLs from CSV file: {} ({} bytes)", file.getOriginalFilename(), file.getSize());
+        
+        try {
+            // Parse CSV file
+            List<CreateUrlRequest> urlRequests = CsvParser.parseCsvFile(file);
+            
+            // Apply bulk-level settings
+            for (CreateUrlRequest urlRequest : urlRequests) {
+                urlRequest.setFetchMetadata(fetchMetadata);
+                urlRequest.setEnableAiAnalysis(enableAiAnalysis);
+            }
+            
+            // Create bulk request
+            BulkCreateRequest bulkRequest = BulkCreateRequest.builder()
+                    .urls(urlRequests)
+                    .fetchMetadata(fetchMetadata)
+                    .enableAiAnalysis(enableAiAnalysis)
+                    .build();
+            
+            // Process bulk creation
+            BulkCreateResponse response = urlShortenerService.createBulkShortUrls(bulkRequest);
+            log.info("Bulk CSV creation completed: {} success, {} failed", response.getSuccessCount(), response.getFailedCount());
+            
+            return ResponseEntity.status(HttpStatus.CREATED).body(response);
+            
+        } catch (IllegalArgumentException e) {
+            log.warn("Invalid CSV file: {}", e.getMessage(), e);
+            return ResponseEntity.badRequest()
+                    .body(BulkCreateResponse.builder()
+                            .successCount(0)
+                            .failedCount(0)
+                            .results(Collections.emptyList())
+                            .errors(Collections.emptyList())
+                            .build());
+        } catch (Exception e) {
+            log.error("Error processing CSV file: {}", e.getMessage(), e);
+            e.printStackTrace(); // Print full stack trace for debugging
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(BulkCreateResponse.builder()
+                            .successCount(0)
+                            .failedCount(0)
+                            .results(Collections.emptyList())
+                            .errors(Collections.emptyList())
+                            .build());
+        }
     }
 
     @Operation(
